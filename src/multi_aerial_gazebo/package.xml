@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>multi_aerial_gazebo</name>
+  <version>0.0.1</version>
+  <description>Gazebo simulation with three aerial robots in ROS2 Iron.</description>
+
+  <maintainer email="yahboom@example.com">yahboom</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

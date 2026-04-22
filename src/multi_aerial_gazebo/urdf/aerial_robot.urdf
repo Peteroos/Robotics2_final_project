@@ -1,0 +1,141 @@
+<?xml version="1.0"?>
+<robot name="aerial_robot">
+  <material name="body_gray">
+    <color rgba="0.4 0.4 0.45 1.0"/>
+  </material>
+
+  <material name="prop_red">
+    <color rgba="0.9 0.2 0.2 1.0"/>
+  </material>
+
+  <material name="prop_green">
+    <color rgba="0.2 0.9 0.2 1.0"/>
+  </material>
+
+  <material name="prop_blue">
+    <color rgba="0.2 0.4 0.9 1.0"/>
+  </material>
+
+  <material name="prop_yellow">
+    <color rgba="0.95 0.9 0.2 1.0"/>
+  </material>
+
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.5"/>
+      <inertia ixx="0.03" ixy="0.0" ixz="0.0" iyy="0.03" iyz="0.0" izz="0.05"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.28 0.12 0.06"/>
+      </geometry>
+      <material name="body_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.28 0.12 0.06"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="arm_x">
+    <visual>
+      <geometry>
+        <box size="0.42 0.03 0.02"/>
+      </geometry>
+      <material name="body_gray"/>
+    </visual>
+  </link>
+
+  <joint name="arm_x_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_x"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="arm_y">
+    <visual>
+      <geometry>
+        <box size="0.03 0.42 0.02"/>
+      </geometry>
+      <material name="body_gray"/>
+    </visual>
+  </link>
+
+  <joint name="arm_y_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_y"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="prop_fl">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.07" length="0.01"/>
+      </geometry>
+      <material name="prop_red"/>
+    </visual>
+  </link>
+
+  <joint name="prop_fl_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="prop_fl"/>
+    <origin xyz="0.18 0.18 0.01" rpy="0 0 0"/>
+  </joint>
+
+  <link name="prop_fr">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.07" length="0.01"/>
+      </geometry>
+      <material name="prop_green"/>
+    </visual>
+  </link>
+
+  <joint name="prop_fr_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="prop_fr"/>
+    <origin xyz="0.18 -0.18 0.01" rpy="0 0 0"/>
+  </joint>
+
+  <link name="prop_rl">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.07" length="0.01"/>
+      </geometry>
+      <material name="prop_blue"/>
+    </visual>
+  </link>
+
+  <joint name="prop_rl_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="prop_rl"/>
+    <origin xyz="-0.18 0.18 0.01" rpy="0 0 0"/>
+  </joint>
+
+  <link name="prop_rr">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.07" length="0.01"/>
+      </geometry>
+      <material name="prop_yellow"/>
+    </visual>
+  </link>
+
+  <joint name="prop_rr_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="prop_rr"/>
+    <origin xyz="-0.18 -0.18 0.01" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="base_link">
+    <static>true</static>
+  </gazebo>
+</robot>
