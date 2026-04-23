@@ -31,19 +31,23 @@ Iz = 0.04
 
 dt = 0.01
 Tsim = 20
-N = int(Tsim / dt)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Quadrotor Simulation")
     parser.add_argument("--headless", action="store_true", help="Run without visualization")
+    parser.add_argument("--timeout", type=float, default=60.0, help="Simulation timeout in seconds (default: 60.0)")
     args = parser.parse_args()
 
+    # Run long enough to verify whether the swarm actually settles in the goal region.
+    sim_duration = max(Tsim, args.timeout)
+    n_steps = int(sim_duration / dt)
+
     # ====================
-    # Drones initialization (Volume Occupation)
+    # Goal region for emergent 3D distribution
     # ====================
-    shared_volume = {'center': np.array([1.0, 1.0, 1.5]), 'extents': np.array([0.5, 0.5, 0.5])}
-    
+    goal_region = {'center': np.array([1.0, 1.0, 1.5]), 'extents': np.array([0.5, 0.5, 0.5])}
+
     drones = []
     # Procedural generation on Archimedean spiral: r = b * theta
     # Using theta = 2*sqrt(i) to maintain approx constant spacing along the spiral
@@ -53,10 +57,22 @@ def main():
         r = b_spiral * theta
         x0 = r * np.cos(theta)
         y0 = r * np.sin(theta)
-        drones.append(Drone(f"Drone{i+1}", np.array([x0, y0, 0.0]), [shared_volume]))
+        # Initial z: staggered per drone so the swarm is not perfectly coplanar at
+        # takeoff (pure symmetry would trap the boid into a horizontal plane because
+        # there is nothing to break it). This is an initial condition only, not a
+        # per-drone target. Start above `ground_clearance` so the ground barrier
+        # does not fire at t=0 and wind up the velocity PID integrator.
+        z0 = 0.35 + 0.05 * i
+        drones.append(Drone(f"Drone{i+1}", np.array([x0, y0, z0]), goal_region, i, NUM_DRONES))
 
     T_traj = 10.0 # Trajectory duration for each segment
-    threshold = 0.1 # Distance threshold to advance to next waypoint
+
+    def swarm_occupancy_metrics():
+        positions = np.array([d.x[0:3] for d in drones])
+        mins = positions.min(axis=0)
+        maxs = positions.max(axis=0)
+        span = maxs - mins
+        return mins, maxs, span
 
     # ====================
     # Simulation setup
@@ -65,13 +81,12 @@ def main():
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         
-        # Set fixed axis limits that include all waypoints and start positions
+        # Set fixed axis limits that include goal region and start positions
         all_points = []
         for d in drones:
             all_points.append(d.x[0:3])
-            for wp in d.waypoints:
-                all_points.append(wp['center'] + wp['extents'])
-                all_points.append(wp['center'] - wp['extents'])
+        all_points.append(goal_region['center'] + goal_region['extents'])
+        all_points.append(goal_region['center'] - goal_region['extents'])
         all_points = np.array(all_points)
         
         min_xyz = np.min(all_points, axis=0)
@@ -95,10 +110,8 @@ def main():
             # Fallback for older matplotlib versions
             pass
 
-        # Draw volume waypoints
-        for drone in drones:
-            for wp in drone.waypoints:
-                draw_box(ax, wp['center'], wp['extents'])
+        # Draw goal region volume
+        draw_box(ax, goal_region['center'], goal_region['extents'])
 
     # ====================
     # Simulation loop
@@ -108,10 +121,19 @@ def main():
     last_print_t = -print_interval
     
     if args.headless:
-        # Fixed step simulation for headless testing
+        # Fixed step simulation for headless testing with emergent 3D distribution
         dt_fixed = 0.01
-        for k in range(N - 1):
+        start_time = time.time()
+        
+        for k in range(n_steps - 1):
             t = k * dt_fixed
+            
+            # Check for timeout or instability (drone height exceeding 100m)
+            max_height = max([d.x[2] for d in drones])
+            elapsed_time = time.time() - start_time
+            if max_height > 100.0 or elapsed_time > args.timeout:
+                print(f"[TIMEOUT/INSTABILITY] Simulation stopped: max_height={max_height:.2f}m, t={t:.2f}s, elapsed={elapsed_time:.2f}s")
+                break
             
             # Build KD-tree for efficient nearest neighbor search
             all_pos = np.array([d.x[0:3] for d in drones])
@@ -121,21 +143,42 @@ def main():
                 # Query for NUM_NEIGHBORS + 1 (including self)
                 indices = kdtree.query(drone.x[0:3], NUM_NEIGHBORS + 1)
                 neighbor_positions = [all_pos[idx] for idx in indices if idx != i]
-                drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj, threshold, neighbor_positions[:NUM_NEIGHBORS])
+                # Updated signature: no threshold parameter
+                drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj, neighbor_positions[:NUM_NEIGHBORS])
 
             # Print status
             if t - last_print_t >= print_interval:
                 status_str = f"t={t:.2f}"
+                drifted_drones = []
+                mins, maxs, span = swarm_occupancy_metrics()
                 for drone in drones:
-                    status_str += f" | {drone.name}: x={drone.x[0]:.2f}, y={drone.x[1]:.2f}, z={drone.x[2]:.2f}"
+                    pos = drone.x[0:3]
+                    status_str += f" | {drone.name}: x={pos[0]:.2f}, y={pos[1]:.2f}, z={pos[2]:.2f}"
+                    if drone.is_outside_goal_region():
+                        drifted_drones.append(drone.name)
+
+                if drifted_drones:
+                    status_str += f" [DRIFT: {', '.join(drifted_drones)}]"
+
+                status_str += (
+                    f" [SPAN x={span[0]:.2f}, y={span[1]:.2f}, z={span[2]:.2f}]"
+                    f" [MIN x={mins[0]:.2f}, y={mins[1]:.2f}, z={mins[2]:.2f}]"
+                    f" [MAX x={maxs[0]:.2f}, y={maxs[1]:.2f}, z={maxs[2]:.2f}]"
+                )
+
                 print(status_str)
                 last_print_t = t
     else:
-        # Real-time simulation for visual mode
+        # Real-time simulation for visual mode with emergent 3D distribution
         start_time = time.time()
         last_t = 0.0
         
-        while t < Tsim:
+        while t < sim_duration:
+            elapsed_time = time.time() - start_time
+            if elapsed_time > args.timeout:
+                print(f"[TIMEOUT] Simulation stopped by timeout: {elapsed_time:.2f}s > {args.timeout}s")
+                break
+
             current_real_time = time.time() - start_time
             dt_loop = current_real_time - last_t
             
@@ -157,13 +200,29 @@ def main():
                 # Query for NUM_NEIGHBORS + 1 (including self)
                 indices = kdtree.query(drone.x[0:3], NUM_NEIGHBORS + 1)
                 neighbor_positions = [all_pos[idx] for idx in indices if idx != i]
-                drone.update(t, dt_step, m, g, Ix, Iy, Iz, T_traj, threshold, neighbor_positions[:NUM_NEIGHBORS])
+                # Updated signature: no threshold parameter
+                drone.update(t, dt_step, m, g, Ix, Iy, Iz, T_traj, neighbor_positions[:NUM_NEIGHBORS])
 
             # Print status
             if t - last_print_t >= print_interval:
                 status_str = f"t={t:.2f}"
+                drifted_drones = []
+                mins, maxs, span = swarm_occupancy_metrics()
                 for drone in drones:
-                    status_str += f" | {drone.name}: x={drone.x[0]:.2f}, y={drone.x[1]:.2f}, z={drone.x[2]:.2f}"
+                    pos = drone.x[0:3]
+                    status_str += f" | {drone.name}: x={pos[0]:.2f}, y={pos[1]:.2f}, z={pos[2]:.2f}"
+                    if drone.is_outside_goal_region():
+                        drifted_drones.append(drone.name)
+
+                if drifted_drones:
+                    status_str += f" [DRIFT: {', '.join(drifted_drones)}]"
+
+                status_str += (
+                    f" [SPAN x={span[0]:.2f}, y={span[1]:.2f}, z={span[2]:.2f}]"
+                    f" [MIN x={mins[0]:.2f}, y={mins[1]:.2f}, z={mins[2]:.2f}]"
+                    f" [MAX x={maxs[0]:.2f}, y={maxs[1]:.2f}, z={maxs[2]:.2f}]"
+                )
+
                 print(status_str)
                 last_print_t = t
 
