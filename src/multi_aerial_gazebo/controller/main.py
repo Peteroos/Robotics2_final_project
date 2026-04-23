@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
+import time
 from controller import (
     minimum_jerk_trajectory,
     quad_dynamics,
@@ -22,29 +23,69 @@ dt = 0.01
 Tsim = 15
 N = int(Tsim / dt)
 
+class Drone:
+    def __init__(self, name, start_pos, waypoints):
+        self.name = name
+        self.x = np.zeros(12)
+        self.x[0:3] = start_pos
+        self.p0 = start_pos
+        self.waypoints = waypoints
+        self.wp_idx = 0
+        self.pf = waypoints[0]
+        self.t_start_segment = 0.0
+        self.controller = CascadedController()
+        self.robot_plot = []
+
+    def update(self, t, dt, m, g, Ix, Iy, Iz, T_traj, threshold):
+        t_segment = t - self.t_start_segment
+        
+        # Check if we reached the current waypoint
+        dist_to_wp = np.linalg.norm(self.pf - self.x[0:3])
+        if dist_to_wp < threshold and self.wp_idx < len(self.waypoints) - 1:
+            self.wp_idx += 1
+            self.p0 = self.pf
+            self.pf = self.waypoints[self.wp_idx]
+            self.t_start_segment = t
+            t_segment = 0.0
+            print(f"[{self.name}] Reached waypoint {self.wp_idx-1}, moving to waypoint {self.wp_idx}: {self.pf}")
+
+        pos_ref, vel_ref, acc_ref = minimum_jerk_trajectory(self.p0, self.pf, T_traj, t_segment)
+        yaw_ref = 0.0
+        
+        # Cascaded Controller
+        u1, u2, u3, u4 = self.controller.control(self.x, pos_ref, vel_ref, acc_ref, yaw_ref, m, g, dt)
+        
+        # Dynamics update
+        dx = quad_dynamics(self.x, u1, u2, u3, u4, m, g, Ix, Iy, Iz)
+        self.x = self.x + dt * dx
+
 def main():
     parser = argparse.ArgumentParser(description="Quadrotor Simulation")
     parser.add_argument("--headless", action="store_true", help="Run without visualization")
     args = parser.parse_args()
 
     # ====================
-    # Initial state
+    # Drones initialization
     # ====================
-    x = np.zeros((12, N))
-    p0 = np.array([0.0, 0.0, 0.0])
-    waypoints = [
-        np.array([0.0, 0.0, 1.0]),
-        np.array([1.0, 0.0, 1.0]),
-        np.array([1.0, 1.0, 1.0]),
-        np.array([0.0, 1.0, 1.0]),
-        np.array([0.0, 0.0, 1.0])
+    drones = [
+        Drone("Drone1", np.array([0.0, 0.0, 0.0]), [
+            np.array([0.0, 0.0, 1.0]),
+            np.array([1.0, 0.0, 1.0]),
+            np.array([1.0, 1.0, 1.0]),
+            np.array([0.0, 1.0, 1.0]),
+            np.array([0.0, 0.0, 1.0])
+        ]),
+        Drone("Drone2", np.array([0.5, 0.5, 0.0]), [
+            np.array([0.5, 0.5, 1.5]),
+            np.array([-0.5, 0.5, 1.5]),
+            np.array([-0.5, -0.5, 1.5]),
+            np.array([0.5, -0.5, 1.5]),
+            np.array([0.5, 0.5, 1.5])
+        ])
     ]
-    wp_idx = 0
-    pf = waypoints[wp_idx]
+
     T_traj = 3.0 # Trajectory duration for each segment
     threshold = 0.1 # Distance threshold to advance to next waypoint
-
-    controller = CascadedController(dt)
 
     # ====================
     # Simulation setup
@@ -52,47 +93,69 @@ def main():
     if not args.headless:
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        robot_plot = []
+        ax.set_xlim([-1.5, 1.5])
+        ax.set_ylim([-1.5, 1.5])
+        ax.set_zlim([0, 2])
 
     # ====================
     # Simulation loop
     # ====================
-    t_start = 0.0
-    print_interval = 10 if args.headless else 100 # Print every 0.1s in headless, 1.0s otherwise
+    t = 0.0
+    print_interval = 0.1 if args.headless else 1.0 
+    last_print_t = -print_interval
+    
+    if args.headless:
+        # Fixed step simulation for headless testing
+        dt_fixed = 0.01
+        for k in range(N - 1):
+            t = k * dt_fixed
+            
+            for drone in drones:
+                drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj, threshold)
 
-    for k in range(N - 1):
-        t = k * dt
-        t_segment = t - t_start
+            # Print status
+            if t - last_print_t >= print_interval:
+                status_str = f"t={t:.2f}"
+                for drone in drones:
+                    status_str += f" | {drone.name}: x={drone.x[0]:.2f}, y={drone.x[1]:.2f}, z={drone.x[2]:.2f}"
+                print(status_str)
+                last_print_t = t
+    else:
+        # Real-time simulation for visual mode
+        start_time = time.time()
+        last_t = 0.0
         
-        # Check if we reached the current waypoint
-        dist_to_wp = np.linalg.norm(pf - x[0:3, k])
-        if dist_to_wp < threshold and wp_idx < len(waypoints) - 1:
-            wp_idx += 1
-            p0 = pf
-            pf = waypoints[wp_idx]
-            t_start = t
-            t_segment = 0.0
-            print(f"Reached waypoint {wp_idx-1}, moving to waypoint {wp_idx}: {pf}")
+        while t < Tsim:
+            current_real_time = time.time() - start_time
+            dt_loop = current_real_time - last_t
+            
+            # Avoid division by zero or extremely small dt
+            if dt_loop < 1e-4:
+                continue
+            
+            # Limit dt to prevent instability
+            dt_step = min(dt_loop, 0.02)
+            
+            t += dt_step
+            last_t = current_real_time
+            
+            for drone in drones:
+                drone.update(t, dt_step, m, g, Ix, Iy, Iz, T_traj, threshold)
 
-        pos_ref, vel_ref, acc_ref = minimum_jerk_trajectory(p0, pf, T_traj, t_segment)
-        yaw_ref = 0.0
-        
-        # Cascaded Controller
-        u1, u2, u3, u4 = controller.control(x[:, k], pos_ref, vel_ref, acc_ref, yaw_ref, m, g)
-        
-        # Dynamics update
-        dx = quad_dynamics(x[:, k], u1, u2, u3, u4, m, g, Ix, Iy, Iz)
-        x[:, k + 1] = x[:, k] + dt * dx
+            # Print status
+            if t - last_print_t >= print_interval:
+                status_str = f"t={t:.2f}"
+                for drone in drones:
+                    status_str += f" | {drone.name}: x={drone.x[0]:.2f}, y={drone.x[1]:.2f}, z={drone.x[2]:.2f}"
+                print(status_str)
+                last_print_t = t
 
-        # Print status
-        if k % print_interval == 0:
-            print(f"t={t:.2f}, wp={wp_idx}, x={x[0, k+1]:.2f}, y={x[1, k+1]:.2f}, z={x[2, k+1]:.2f}")
-
-        if not args.headless:
-            # Delete old plot
-            for h in robot_plot:
-                h.remove()
-            robot_plot = draw_quad(ax, x[:, k + 1])
+            # Visualization
+            for drone in drones:
+                # Delete old plot
+                for h in drone.robot_plot:
+                    h.remove()
+                drone.robot_plot = draw_quad(ax, drone.x)
             plt.pause(0.001)
 
     if not args.headless:
