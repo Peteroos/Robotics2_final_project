@@ -36,7 +36,26 @@ class Drone:
         self.controller = CascadedController()
         self.robot_plot = []
 
-    def update(self, t, dt, m, g, Ix, Iy, Iz, T_traj, threshold):
+    def calculate_repulsion(self, other_drones, d0=1.0, eta=0.2):
+        repulsion = np.zeros(3)
+        pos = self.x[0:3]
+        for other in other_drones:
+            if other == self:
+                continue
+            other_pos = other.x[0:3]
+            diff = pos - other_pos
+            dist = np.linalg.norm(diff)
+            if dist < d0 and dist > 0.01:
+                # Standard repulsive potential gradient: η * (1/d - 1/d0) * (1/d^2) * unit_vec
+                mag = eta * (1.0/dist - 1.0/d0) * (1.0/dist**2)
+                unit_vec = diff / dist
+                # Add a lateral bias to break symmetry for head-on collisions
+                # This ensures drones steer around each other
+                lateral_bias = np.array([-unit_vec[1], unit_vec[0], 0.1])
+                repulsion += mag * (unit_vec + lateral_bias)
+        return repulsion
+
+    def update(self, t, dt, m, g, Ix, Iy, Iz, T_traj, threshold, other_drones):
         t_segment = t - self.t_start_segment
         
         # Check if we reached the current waypoint
@@ -49,7 +68,14 @@ class Drone:
             t_segment = 0.0
             print(f"[{self.name}] Reached waypoint {self.wp_idx-1}, moving to waypoint {self.wp_idx}: {self.pf}")
 
-        pos_ref, vel_ref, acc_ref = minimum_jerk_trajectory(self.p0, self.pf, T_traj, t_segment)
+        # Integrate Potential Field with Min Jerk
+        # Calculate repulsive force from other drones
+        rep_force = self.calculate_repulsion(other_drones)
+        # Shift the min-jerk destination based on the potential field force
+        # This allows the trajectory to "bend" smoothly as drones approach each other
+        pf_reactive = self.pf + rep_force
+        
+        pos_ref, vel_ref, acc_ref = minimum_jerk_trajectory(self.p0, pf_reactive, T_traj, t_segment)
         yaw_ref = 0.0
         
         # Cascaded Controller
@@ -65,26 +91,18 @@ def main():
     args = parser.parse_args()
 
     # ====================
-    # Drones initialization
+    # Drones initialization (Collision Course)
     # ====================
     drones = [
-        Drone("Drone1", np.array([0.0, 0.0, 0.0]), [
-            np.array([0.0, 0.0, 1.0]),
-            np.array([1.0, 0.0, 1.0]),
-            np.array([1.0, 1.0, 1.0]),
-            np.array([0.0, 1.0, 1.0]),
-            np.array([0.0, 0.0, 1.0])
+        Drone("Drone1", np.array([0.0, 0.0, 1.0]), [
+            np.array([2.0, 0.0, 1.0])
         ]),
-        Drone("Drone2", np.array([0.5, 0.5, 0.0]), [
-            np.array([0.5, 0.5, 1.5]),
-            np.array([-0.5, 0.5, 1.5]),
-            np.array([-0.5, -0.5, 1.5]),
-            np.array([0.5, -0.5, 1.5]),
-            np.array([0.5, 0.5, 1.5])
+        Drone("Drone2", np.array([2.0, 0.0, 1.0]), [
+            np.array([0.0, 0.0, 1.0])
         ])
     ]
 
-    T_traj = 3.0 # Trajectory duration for each segment
+    T_traj = 5.0 # Trajectory duration for each segment
     threshold = 0.1 # Distance threshold to advance to next waypoint
 
     # ====================
@@ -93,9 +111,35 @@ def main():
     if not args.headless:
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        ax.set_xlim([-1.5, 1.5])
-        ax.set_ylim([-1.5, 1.5])
-        ax.set_zlim([0, 2])
+        
+        # Set fixed axis limits that include all waypoints and start positions
+        all_points = []
+        for d in drones:
+            all_points.append(d.x[0:3])
+            for wp in d.waypoints:
+                all_points.append(wp)
+        all_points = np.array(all_points)
+        
+        min_xyz = np.min(all_points, axis=0)
+        max_xyz = np.max(all_points, axis=0)
+        
+        # Calculate center and maximum range to equalize axes
+        center = (min_xyz + max_xyz) / 2
+        max_range = np.max(max_xyz - min_xyz)
+        margin = 0.5
+        span = max_range + 2 * margin
+        half_span = span / 2
+        
+        ax.set_xlim([center[0] - half_span, center[0] + half_span])
+        ax.set_ylim([center[1] - half_span, center[1] + half_span])
+        ax.set_zlim([0, span])
+        
+        # Equalize axis scaling
+        try:
+            ax.set_box_aspect((1, 1, 1))
+        except AttributeError:
+            # Fallback for older matplotlib versions
+            pass
 
     # ====================
     # Simulation loop
@@ -111,7 +155,7 @@ def main():
             t = k * dt_fixed
             
             for drone in drones:
-                drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj, threshold)
+                drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj, threshold, drones)
 
             # Print status
             if t - last_print_t >= print_interval:
@@ -140,7 +184,7 @@ def main():
             last_t = current_real_time
             
             for drone in drones:
-                drone.update(t, dt_step, m, g, Ix, Iy, Iz, T_traj, threshold)
+                drone.update(t, dt_step, m, g, Ix, Iy, Iz, T_traj, threshold, drones)
 
             # Print status
             if t - last_print_t >= print_interval:
@@ -156,6 +200,7 @@ def main():
                 for h in drone.robot_plot:
                     h.remove()
                 drone.robot_plot = draw_quad(ax, drone.x)
+
             plt.pause(0.001)
 
     if not args.headless:

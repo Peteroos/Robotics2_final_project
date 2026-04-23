@@ -25,7 +25,4 @@ def draw_quad(ax, x):
                      'b', linewidth=3)[0])
     # Body
     h.append(ax.scatter(p[0], p[1], p[2], c='k', marker='o'))
-    ax.set_xlim([-1, 1])
-    ax.set_ylim([-1, 1])
-    ax.set_zlim([0, 2])
     return h
