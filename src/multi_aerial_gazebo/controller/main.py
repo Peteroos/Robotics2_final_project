@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
 from controller import (
     minimum_jerk_trajectory,
     quad_dynamics,
@@ -22,6 +23,10 @@ Tsim = 15
 N = int(Tsim / dt)
 
 def main():
+    parser = argparse.ArgumentParser(description="Quadrotor Simulation")
+    parser.add_argument("--headless", action="store_true", help="Run without visualization")
+    args = parser.parse_args()
+
     # ====================
     # Initial state
     # ====================
@@ -44,14 +49,17 @@ def main():
     # ====================
     # Simulation setup
     # ====================
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    robot_plot = []
+    if not args.headless:
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        robot_plot = []
 
     # ====================
     # Simulation loop
     # ====================
     t_start = 0.0
+    print_interval = 10 if args.headless else 100 # Print every 0.1s in headless, 1.0s otherwise
+
     for k in range(N - 1):
         t = k * dt
         t_segment = t - t_start
@@ -76,17 +84,19 @@ def main():
         dx = quad_dynamics(x[:, k], u1, u2, u3, u4, m, g, Ix, Iy, Iz)
         x[:, k + 1] = x[:, k] + dt * dx
 
-        # Print status every 1 second
-        if k % 100 == 0:
+        # Print status
+        if k % print_interval == 0:
             print(f"t={t:.2f}, wp={wp_idx}, x={x[0, k+1]:.2f}, y={x[1, k+1]:.2f}, z={x[2, k+1]:.2f}")
 
-        # Delete old plot
-        for h in robot_plot:
-            h.remove()
-        robot_plot = draw_quad(ax, x[:, k + 1])
-        plt.pause(0.001)
+        if not args.headless:
+            # Delete old plot
+            for h in robot_plot:
+                h.remove()
+            robot_plot = draw_quad(ax, x[:, k + 1])
+            plt.pause(0.001)
 
-    plt.show()
+    if not args.headless:
+        plt.show()
 
 if __name__ == "__main__":
     main()
