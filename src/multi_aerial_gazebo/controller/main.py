@@ -2,88 +2,37 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import time
-from controller import (
-    minimum_jerk_trajectory,
-    quad_dynamics,
-    CascadedController
+from simulator import (
+    KDTree
 )
-from renderer import draw_quad
+from drone import Drone
+from renderer import draw_quad, draw_box
 
 # ====================
 # Parameters
 # ====================
+NUM_DRONES = 5 # Number of drones in the simulation
+NUM_NEIGHBORS = 3 # Number of nearest neighbors to consider for repulsion
 m = 1.0
 g = 9.81
+
+# ====================
+# Performance Optimization Opportunities for Large N:
+# ====================
+# 1. Vectorization: Use NumPy broadcasting for repulsion calculations instead of nested loops.
+# 2. Spatial Partitioning: Use k-d trees or spatial hashes to limit repulsion to local neighbors.
+# 3. Parallelization: Parallelize per-drone update() calls as they are mostly independent.
+# 4. JIT/GPU: Use Numba or JAX to compile physics/control logic for large swarms.
+# ====================
 
 Ix = 0.02
 Iy = 0.02
 Iz = 0.04
 
 dt = 0.01
-Tsim = 15
+Tsim = 20
 N = int(Tsim / dt)
 
-class Drone:
-    def __init__(self, name, start_pos, waypoints):
-        self.name = name
-        self.x = np.zeros(12)
-        self.x[0:3] = start_pos
-        self.p0 = start_pos
-        self.waypoints = waypoints
-        self.wp_idx = 0
-        self.pf = waypoints[0]
-        self.t_start_segment = 0.0
-        self.controller = CascadedController()
-        self.robot_plot = []
-
-    def calculate_repulsion(self, other_drones, d0=1.0, eta=0.2):
-        repulsion = np.zeros(3)
-        pos = self.x[0:3]
-        for other in other_drones:
-            if other == self:
-                continue
-            other_pos = other.x[0:3]
-            diff = pos - other_pos
-            dist = np.linalg.norm(diff)
-            if dist < d0 and dist > 0.01:
-                # Standard repulsive potential gradient: η * (1/d - 1/d0) * (1/d^2) * unit_vec
-                mag = eta * (1.0/dist - 1.0/d0) * (1.0/dist**2)
-                unit_vec = diff / dist
-                # Add a lateral bias to break symmetry for head-on collisions
-                # This ensures drones steer around each other
-                lateral_bias = np.array([-unit_vec[1], unit_vec[0], 0.1])
-                repulsion += mag * (unit_vec + lateral_bias)
-        return repulsion
-
-    def update(self, t, dt, m, g, Ix, Iy, Iz, T_traj, threshold, other_drones):
-        t_segment = t - self.t_start_segment
-        
-        # Check if we reached the current waypoint
-        dist_to_wp = np.linalg.norm(self.pf - self.x[0:3])
-        if dist_to_wp < threshold and self.wp_idx < len(self.waypoints) - 1:
-            self.wp_idx += 1
-            self.p0 = self.pf
-            self.pf = self.waypoints[self.wp_idx]
-            self.t_start_segment = t
-            t_segment = 0.0
-            print(f"[{self.name}] Reached waypoint {self.wp_idx-1}, moving to waypoint {self.wp_idx}: {self.pf}")
-
-        # Integrate Potential Field with Min Jerk
-        # Calculate repulsive force from other drones
-        rep_force = self.calculate_repulsion(other_drones)
-        # Shift the min-jerk destination based on the potential field force
-        # This allows the trajectory to "bend" smoothly as drones approach each other
-        pf_reactive = self.pf + rep_force
-        
-        pos_ref, vel_ref, acc_ref = minimum_jerk_trajectory(self.p0, pf_reactive, T_traj, t_segment)
-        yaw_ref = 0.0
-        
-        # Cascaded Controller
-        u1, u2, u3, u4 = self.controller.control(self.x, pos_ref, vel_ref, acc_ref, yaw_ref, m, g, dt)
-        
-        # Dynamics update
-        dx = quad_dynamics(self.x, u1, u2, u3, u4, m, g, Ix, Iy, Iz)
-        self.x = self.x + dt * dx
 
 def main():
     parser = argparse.ArgumentParser(description="Quadrotor Simulation")
@@ -91,18 +40,22 @@ def main():
     args = parser.parse_args()
 
     # ====================
-    # Drones initialization (Collision Course)
+    # Drones initialization (Volume Occupation)
     # ====================
-    drones = [
-        Drone("Drone1", np.array([0.0, 0.0, 1.0]), [
-            np.array([2.0, 0.0, 1.0])
-        ]),
-        Drone("Drone2", np.array([2.0, 0.0, 1.0]), [
-            np.array([0.0, 0.0, 1.0])
-        ])
-    ]
+    shared_volume = {'center': np.array([1.0, 1.0, 1.5]), 'extents': np.array([0.5, 0.5, 0.5])}
+    
+    drones = []
+    # Procedural generation on Archimedean spiral: r = b * theta
+    # Using theta = 2*sqrt(i) to maintain approx constant spacing along the spiral
+    b_spiral = 0.5
+    for i in range(NUM_DRONES):
+        theta = 2.0 * np.sqrt(i)
+        r = b_spiral * theta
+        x0 = r * np.cos(theta)
+        y0 = r * np.sin(theta)
+        drones.append(Drone(f"Drone{i+1}", np.array([x0, y0, 0.0]), [shared_volume]))
 
-    T_traj = 5.0 # Trajectory duration for each segment
+    T_traj = 10.0 # Trajectory duration for each segment
     threshold = 0.1 # Distance threshold to advance to next waypoint
 
     # ====================
@@ -117,7 +70,8 @@ def main():
         for d in drones:
             all_points.append(d.x[0:3])
             for wp in d.waypoints:
-                all_points.append(wp)
+                all_points.append(wp['center'] + wp['extents'])
+                all_points.append(wp['center'] - wp['extents'])
         all_points = np.array(all_points)
         
         min_xyz = np.min(all_points, axis=0)
@@ -141,6 +95,11 @@ def main():
             # Fallback for older matplotlib versions
             pass
 
+        # Draw volume waypoints
+        for drone in drones:
+            for wp in drone.waypoints:
+                draw_box(ax, wp['center'], wp['extents'])
+
     # ====================
     # Simulation loop
     # ====================
@@ -154,8 +113,15 @@ def main():
         for k in range(N - 1):
             t = k * dt_fixed
             
-            for drone in drones:
-                drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj, threshold, drones)
+            # Build KD-tree for efficient nearest neighbor search
+            all_pos = np.array([d.x[0:3] for d in drones])
+            kdtree = KDTree(all_pos)
+            
+            for i, drone in enumerate(drones):
+                # Query for NUM_NEIGHBORS + 1 (including self)
+                indices = kdtree.query(drone.x[0:3], NUM_NEIGHBORS + 1)
+                neighbor_positions = [all_pos[idx] for idx in indices if idx != i]
+                drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj, threshold, neighbor_positions[:NUM_NEIGHBORS])
 
             # Print status
             if t - last_print_t >= print_interval:
@@ -183,8 +149,15 @@ def main():
             t += dt_step
             last_t = current_real_time
             
-            for drone in drones:
-                drone.update(t, dt_step, m, g, Ix, Iy, Iz, T_traj, threshold, drones)
+            # Build KD-tree for efficient nearest neighbor search
+            all_pos = np.array([d.x[0:3] for d in drones])
+            kdtree = KDTree(all_pos)
+            
+            for i, drone in enumerate(drones):
+                # Query for NUM_NEIGHBORS + 1 (including self)
+                indices = kdtree.query(drone.x[0:3], NUM_NEIGHBORS + 1)
+                neighbor_positions = [all_pos[idx] for idx in indices if idx != i]
+                drone.update(t, dt_step, m, g, Ix, Iy, Iz, T_traj, threshold, neighbor_positions[:NUM_NEIGHBORS])
 
             # Print status
             if t - last_print_t >= print_interval:

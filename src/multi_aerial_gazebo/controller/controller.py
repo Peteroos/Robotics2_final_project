@@ -2,6 +2,7 @@
 
 import numpy as np
 
+
 class PID:
     def __init__(self, kp, ki, kd, ilimit=None):
         self.kp = np.array(kp)
@@ -20,48 +21,6 @@ class PID:
         self.prev_error = error
         return self.kp * error + self.ki * self.integral + self.kd * derivative
 
-def minimum_jerk_trajectory(p0, pf, T, t):
-    """
-    p0: initial position
-    pf: final position
-    T: total time
-    t: current time
-    """
-    if t > T:
-        t = T
-    tau = t / T
-    # 5th order polynomial for minimum jerk
-    pos = p0 + (pf - p0) * (10 * tau**3 - 15 * tau**4 + 6 * tau**5)
-    vel = (pf - p0) * (30 * tau**2 - 60 * tau**3 + 30 * tau**4) / T
-    acc = (pf - p0) * (60 * tau - 180 * tau**2 + 120 * tau**3) / T**2
-    return pos, vel, acc
-
-def quad_dynamics(x, u1, u2, u3, u4, m, g, Ix, Iy, Iz):
-    phi, theta, psi = x[3], x[4], x[5]
-    vx, vy, vz = x[6], x[7], x[8]
-    p, q, r = x[9], x[10], x[11]
-
-    R = rotation_matrix(phi, theta, psi)
-
-    dx = np.zeros(12)
-
-    # Positions
-    dx[0:3] = [vx, vy, vz]
-
-    # Euler angles
-    dx[3] = p + r * np.sin(theta)
-    dx[4] = p * np.sin(theta) * np.tan(phi) + q - r * np.cos(theta) * np.tan(phi)
-    dx[5] = -p * np.sin(theta) / np.cos(phi) + r * np.cos(theta) / np.cos(phi)
-
-    # Velocities
-    dx[6:9] = (1 / m) * R @ np.array([0, 0, u1]) + np.array([0, 0, -g])
-
-    # Angular rates
-    dx[9] = ((Iy - Iz) / Ix) * q * r + u2 / Ix
-    dx[10] = ((Iz - Ix) / Iy) * p * r + u3 / Iy
-    dx[11] = u4 / Iz
-
-    return dx
 
 # ====================
 # Controller functions
@@ -78,14 +37,17 @@ class CascadedController:
         # Rate controller: takes (p, q, r) error -> desired (u2, u3, u4)
         self.rate_pid = PID(kp=[0.1, 0.1, 0.1], ki=[0.0, 0.0, 0.0], kd=[0.0, 0.0, 0.0], ilimit=[1.0, 1.0, 1.0])
 
-    def control(self, x, pos_ref, vel_ref, acc_ref, yaw_ref, m, g, dt):
+    def control(self, x, p0, pf, T_traj, t_segment, yaw_ref, m, g, dt):
         # x: [x, y, z, phi, theta, psi, vx, vy, vz, p, q, r]
         pos = x[0:3]
         att = x[3:6]
         vel = x[6:9]
         rates = x[9:12]
 
-        # 1. Position Controller
+        # 1. Trajectory Generation (Minimum Jerk)
+        pos_ref, vel_ref, acc_ref = self.minimum_jerk_trajectory(p0, pf, T_traj, t_segment)
+
+        # 2. Position Controller
         pos_error = pos_ref - pos
         # Use velocity error as well for better damping
         vel_error = vel_ref - vel
@@ -129,24 +91,22 @@ class CascadedController:
         
         return u1, u2, u3, u4
 
-# ====================
-# Rotation matrix
-# ====================
-def rotation_matrix(phi, theta, psi):
-    
-    R = np.array([
-        [np.cos(psi)*np.cos(theta) - np.sin(phi)*np.sin(psi)*np.sin(theta),
-         -np.cos(phi)*np.sin(psi),
-         np.cos(psi)*np.sin(theta) + np.cos(theta)*np.sin(phi)*np.sin(psi)],
-        [np.sin(psi)*np.cos(theta) + np.cos(psi)*np.sin(phi)*np.sin(theta),
-         np.cos(phi)*np.cos(psi),
-         np.sin(psi)*np.sin(theta) - np.cos(psi)*np.cos(theta)*np.sin(phi)],
-        [-np.cos(phi)*np.sin(theta),
-         np.sin(phi),
-         np.cos(phi)*np.cos(theta)]
-    ])
+    def minimum_jerk_trajectory(self, p0, pf, T, t):
+        """
+        p0: initial position
+        pf: final position
+        T: total time
+        t: current time
+        """
+        if t > T:
+            t = T
+        tau = t / T
+        # 5th order polynomial for minimum jerk
+        pos = p0 + (pf - p0) * (10 * tau**3 - 15 * tau**4 + 6 * tau**5)
+        vel = (pf - p0) * (30 * tau**2 - 60 * tau**3 + 30 * tau**4) / T
+        acc = (pf - p0) * (60 * tau - 180 * tau**2 + 120 * tau**3) / T**2
+        return pos, vel, acc
 
-    return R
 
 
 
