@@ -8,6 +8,13 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 install(
+  PROGRAMS
+    scripts/multi_robot_state_interface.py
+    scripts/multi_robot_pid_controller.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(
   DIRECTORY launch urdf worlds
   DESTINATION share/${PROJECT_NAME}
 )

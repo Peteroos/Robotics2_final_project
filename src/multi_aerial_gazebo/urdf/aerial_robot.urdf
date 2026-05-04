@@ -136,6 +136,6 @@
   </joint>
 
   <gazebo reference="base_link">
-    <static>true</static>
+    <gravity>false</gravity>
   </gazebo>
 </robot>

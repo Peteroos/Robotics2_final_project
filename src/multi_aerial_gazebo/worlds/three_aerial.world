@@ -23,24 +23,26 @@
       <real_time_factor>1.0</real_time_factor>
     </physics>
 
-    <!-- North wall -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <ros>
+        <namespace>/gazebo</namespace>
+      </ros>
+      <update_rate>50.0</update_rate>
+    </plugin>
+
+    <!-- ================================================================ -->
+    <!-- Fence walls: 20 m x 20 m arena, 1.5 m tall                       -->
+    <!-- ================================================================ -->
+
     <model name="wall_north">
       <static>true</static>
-      <pose>0 6 0.75 0 0 0</pose>
+      <pose>0 10 1.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry>
-            <box>
-              <size>14 0.2 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>20 0.2 3.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <box>
-              <size>14 0.2 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>20 0.2 3.0</size></box></geometry>
           <material>
             <ambient>0.85 0.85 0.85 1.0</ambient>
             <diffuse>0.85 0.85 0.85 1.0</diffuse>
@@ -49,24 +51,15 @@
       </link>
     </model>
 
-    <!-- South wall -->
     <model name="wall_south">
       <static>true</static>
-      <pose>0 -6 0.75 0 0 0</pose>
+      <pose>0 -10 1.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry>
-            <box>
-              <size>14 0.2 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>20 0.2 3.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <box>
-              <size>14 0.2 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>20 0.2 3.0</size></box></geometry>
           <material>
             <ambient>0.85 0.85 0.85 1.0</ambient>
             <diffuse>0.85 0.85 0.85 1.0</diffuse>
@@ -75,24 +68,15 @@
       </link>
     </model>
 
-    <!-- East wall -->
     <model name="wall_east">
       <static>true</static>
-      <pose>6 0 0.75 0 0 0</pose>
+      <pose>10 0 1.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.2 14 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>0.2 20 3.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.2 14 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>0.2 20 3.0</size></box></geometry>
           <material>
             <ambient>0.85 0.85 0.85 1.0</ambient>
             <diffuse>0.85 0.85 0.85 1.0</diffuse>
@@ -101,24 +85,15 @@
       </link>
     </model>
 
-    <!-- West wall -->
     <model name="wall_west">
       <static>true</static>
-      <pose>-6 0 0.75 0 0 0</pose>
+      <pose>-10 0 1.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.2 14 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>0.2 20 3.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.2 14 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>0.2 20 3.0</size></box></geometry>
           <material>
             <ambient>0.85 0.85 0.85 1.0</ambient>
             <diffuse>0.85 0.85 0.85 1.0</diffuse>
@@ -127,23 +102,25 @@
       </link>
     </model>
 
-    <model name="simple_block_1">
+    <!-- ================================================================ -->
+    <!-- Obstacles                                                         -->
+    <!-- IMPORTANT: the launch file contains a hard-coded copy of each    -->
+    <!-- obstacle footprint (x, y, safe_radius) for random drone spawn    -->
+    <!-- collision avoidance. Keep the two in sync!                        -->
+    <!-- ================================================================ -->
+
+    <!-- The red target is at z=3.5, so some obstacles are taller than it
+         (force lateral detour) and some are shorter (could fly over). -->
+
+    <model name="obstacle_block_blue">
       <static>true</static>
-      <pose>2.5 2.0 0.5 0 0 0</pose>
+      <pose>4.0 3.5 1.75 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry>
-            <box>
-              <size>1.2 1.2 1.0</size>
-            </box>
-          </geometry>
+          <geometry><box><size>1.2 1.2 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <box>
-              <size>1.2 1.2 1.0</size>
-            </box>
-          </geometry>
+          <geometry><box><size>1.2 1.2 3.5</size></box></geometry>
           <material>
             <ambient>0.65 0.75 0.90 1.0</ambient>
             <diffuse>0.65 0.75 0.90 1.0</diffuse>
@@ -152,26 +129,128 @@
       </link>
     </model>
 
-    <model name="simple_block_2">
+    <model name="obstacle_block_orange">
       <static>true</static>
-      <pose>-2.2 -2.4 0.75 0 0 0</pose>
+      <pose>-4.5 -4.0 2.0 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry>
-            <box>
-              <size>1.0 1.8 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>1.0 1.8 4.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <box>
-              <size>1.0 1.8 1.5</size>
-            </box>
-          </geometry>
+          <geometry><box><size>1.0 1.8 4.0</size></box></geometry>
           <material>
             <ambient>0.90 0.78 0.65 1.0</ambient>
             <diffuse>0.90 0.78 0.65 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_cylinder_green">
+      <static>true</static>
+      <pose>-3.0 4.0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><cylinder><radius>0.7</radius><length>3.0</length></cylinder></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.7</radius><length>3.0</length></cylinder></geometry>
+          <material>
+            <ambient>0.35 0.70 0.40 1.0</ambient>
+            <diffuse>0.35 0.70 0.40 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_cylinder_purple">
+      <static>true</static>
+      <pose>3.0 -4.0 2.25 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><cylinder><radius>0.6</radius><length>4.5</length></cylinder></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.6</radius><length>4.5</length></cylinder></geometry>
+          <material>
+            <ambient>0.55 0.40 0.75 1.0</ambient>
+            <diffuse>0.55 0.40 0.75 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_pillar_1">
+      <static>true</static>
+      <pose>6.0 -6.0 2.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.8 0.8 5.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 0.8 5.0</size></box></geometry>
+          <material>
+            <ambient>0.55 0.55 0.60 1.0</ambient>
+            <diffuse>0.55 0.55 0.60 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_pillar_2">
+      <static>true</static>
+      <pose>-6.0 6.0 2.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.8 0.8 5.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 0.8 5.0</size></box></geometry>
+          <material>
+            <ambient>0.55 0.55 0.60 1.0</ambient>
+            <diffuse>0.55 0.55 0.60 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_short_box">
+      <static>true</static>
+      <pose>0.0 -6.0 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.4 0.8 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.4 0.8 2.5</size></box></geometry>
+          <material>
+            <ambient>0.90 0.85 0.40 1.0</ambient>
+            <diffuse>0.90 0.85 0.40 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ================================================================ -->
+    <!-- Single red target marker in the sky. All three drones fly here.  -->
+    <!-- IMPORTANT: keep coordinates in sync with launch file's TARGET.    -->
+    <!-- ================================================================ -->
+
+    <model name="target_marker">
+      <static>true</static>
+      <pose>0 5 3.5 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.35</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>1.0 0.05 0.05 1.0</ambient>
+            <diffuse>1.0 0.05 0.05 1.0</diffuse>
+            <specular>0.2 0.0 0.0 1.0</specular>
+            <emissive>0.6 0.0 0.0 1.0</emissive>
           </material>
         </visual>
       </link>
