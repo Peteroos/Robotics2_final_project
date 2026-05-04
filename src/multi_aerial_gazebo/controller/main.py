@@ -36,8 +36,13 @@ Tsim = 20
 def main():
     parser = argparse.ArgumentParser(description="Quadrotor Simulation")
     parser.add_argument("--headless", action="store_true", help="Run without visualization")
-    parser.add_argument("--timeout", type=float, default=60.0, help="Simulation timeout in seconds (default: 60.0)")
+    parser.add_argument("--timeout", type=float, help="Simulation timeout in seconds (default: 60.0)")
     args = parser.parse_args()
+
+    # Determine if timeout was explicitly specified on the command line
+    timeout_specified = args.timeout is not None
+    if args.timeout is None:
+        args.timeout = 60.0
 
     # Run long enough to verify whether the swarm actually settles in the goal region.
     sim_duration = max(Tsim, args.timeout)
@@ -57,12 +62,11 @@ def main():
         r = b_spiral * theta
         x0 = r * np.cos(theta)
         y0 = r * np.sin(theta)
-        # Initial z: staggered per drone so the swarm is not perfectly coplanar at
-        # takeoff (pure symmetry would trap the boid into a horizontal plane because
-        # there is nothing to break it). This is an initial condition only, not a
-        # per-drone target. Start above `ground_clearance` so the ground barrier
-        # does not fire at t=0 and wind up the velocity PID integrator.
-        z0 = 0.35 + 0.05 * i
+        # All drones start on the ground (z = 0). The ground-avoidance barrier
+        # in Drone will fire immediately and push them up; horizontal symmetry
+        # is broken by the Archimedean-spiral XY layout so the swarm does not
+        # get trapped in a perfectly coplanar takeoff.
+        z0 = 0.0
         drones.append(Drone(f"Drone{i+1}", np.array([x0, y0, z0]), goal_region, i, NUM_DRONES))
 
     T_traj = 10.0 # Trajectory duration for each segment
@@ -117,7 +121,10 @@ def main():
     # Simulation loop
     # ====================
     t = 0.0
-    print_interval = 0.1 if args.headless else 1.0 
+    # Use higher-frequency logging whenever the user explicitly asked for a
+    # bounded run via --timeout (typically for data collection / analysis),
+    # regardless of whether visualization is on.
+    print_interval = 0.1 if timeout_specified else 1.0
     last_print_t = -print_interval
     
     if args.headless:
@@ -133,6 +140,8 @@ def main():
             elapsed_time = time.time() - start_time
             if max_height > 100.0 or elapsed_time > args.timeout:
                 print(f"[TIMEOUT/INSTABILITY] Simulation stopped: max_height={max_height:.2f}m, t={t:.2f}s, elapsed={elapsed_time:.2f}s")
+                if elapsed_time > args.timeout and timeout_specified:
+                    return
                 break
             
             # Build KD-tree for efficient nearest neighbor search
@@ -177,6 +186,9 @@ def main():
             elapsed_time = time.time() - start_time
             if elapsed_time > args.timeout:
                 print(f"[TIMEOUT] Simulation stopped by timeout: {elapsed_time:.2f}s > {args.timeout}s")
+                if timeout_specified:
+                    plt.close('all')
+                    return
                 break
 
             current_real_time = time.time() - start_time

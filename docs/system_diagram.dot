@@ -1,0 +1,86 @@
+digraph ControlSystem {
+    rankdir=LR;
+    splines=true;
+    node [shape=box, style=filled, fillcolor=lightgrey, fontname="Arial"];
+    edge [fontname="Arial", fontsize=10];
+
+    # Planners
+    ForceField [label="Force Field Planner\n(repulsion, goal, ground)"];
+    MinJerk [label="Min Jerk Planner\n(minimum_jerk_trajectory)"];
+
+    # Cascaded PID Controller Nodes
+    VelPID [label="Velocity PID\n(Outer Loop)", shape=note];
+    AttPID [label="Attitude PID", shape=note];
+    RatePID [label="Rate PID\n(Inner Loop / Motor Control)", shape=note];
+    
+    SumNode [label="+", shape=circle, fillcolor=white];
+    Mapping [label="Setpoint Mapping\n(Acc to Euler/Thrust)"];
+
+    # Dynamics
+    Dynamics [label="Quadrotor Dynamics\n(quad_dynamics)"];
+
+    # Signals from Force Field to Velocity PID
+    ForceField -> VelPID [label="v_ext_x"];
+    ForceField -> VelPID [label="v_ext_y"];
+    ForceField -> VelPID [label="v_ext_z"];
+
+    # Signals from Min Jerk to Velocity PID
+    MinJerk -> VelPID [label="pos_ref_x"];
+    MinJerk -> VelPID [label="pos_ref_y"];
+    MinJerk -> VelPID [label="pos_ref_z"];
+    MinJerk -> VelPID [label="vel_ref_x"];
+    MinJerk -> VelPID [label="vel_ref_y"];
+    MinJerk -> VelPID [label="vel_ref_z"];
+
+    # Feed Forward from Min Jerk to SumNode
+    MinJerk -> SumNode [label="acc_ff_x"];
+    MinJerk -> SumNode [label="acc_ff_y"];
+    MinJerk -> SumNode [label="acc_ff_z"];
+    
+    # Velocity PID feedback output to SumNode
+    VelPID -> SumNode [label="acc_fb_x"];
+    VelPID -> SumNode [label="acc_fb_y"];
+    VelPID -> SumNode [label="acc_fb_z"];
+
+    # Total Desired Acceleration to Mapping
+    SumNode -> Mapping [label="acc_des_x"];
+    SumNode -> Mapping [label="acc_des_y"];
+    SumNode -> Mapping [label="acc_des_z"];
+
+    # Mapping outputs to Dynamics and Attitude PID
+    Mapping -> Dynamics [label="u1 (Thrust)"];
+    Mapping -> AttPID [label="phi_des"];
+    Mapping -> AttPID [label="theta_des"];
+    MinJerk -> AttPID [label="psi_des"];
+
+    # Attitude PID to Rate PID
+    AttPID -> RatePID [label="p_des"];
+    AttPID -> RatePID [label="q_des"];
+    AttPID -> RatePID [label="r_des"];
+
+    # Rate PID to Dynamics
+    RatePID -> Dynamics [label="u2 (Roll Torque)"];
+    RatePID -> Dynamics [label="u3 (Pitch Torque)"];
+    RatePID -> Dynamics [label="u4 (Yaw Torque)"];
+
+    # Feedback Loops
+    # Position
+    Dynamics -> VelPID [label="x"];
+    Dynamics -> VelPID [label="y"];
+    Dynamics -> VelPID [label="z"];
+    
+    # Velocity
+    Dynamics -> VelPID [label="vx"];
+    Dynamics -> VelPID [label="vy"];
+    Dynamics -> VelPID [label="vz"];
+
+    # Attitude
+    Dynamics -> AttPID [label="phi"];
+    Dynamics -> AttPID [label="theta"];
+    Dynamics -> AttPID [label="psi"];
+
+    # Angular Rates
+    Dynamics -> RatePID [label="p"];
+    Dynamics -> RatePID [label="q"];
+    Dynamics -> RatePID [label="r"];
+}

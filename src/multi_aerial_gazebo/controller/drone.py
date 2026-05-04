@@ -46,33 +46,45 @@ class Drone:
         self.trajectory_history = [self.x[0:3].copy()]
 
         # ---- Separation (collision avoidance) ----
-        # Soft 1/d kernel inside d0 plus a much stiffer 1/d^2 core inside
-        # `close` distance so repulsion dominates as drones approach contact.
-        self.sep_radius = 0.9            # neighbor influence radius (m)
-        self.sep_gain = 1.2              # soft (1/d) gain
-        self.sep_close = 0.35            # hard-avoidance turn-on distance (m)
-        self.sep_hard_gain = 4.0         # hard (1/d^2) gain
-        self.sep_max = 2.5               # saturate separation velocity command (m/s)
+        # Pure soft 1/d kernel inside d0. The previous stiff 1/d^2 core and
+        # large saturation created persistent non-zero repulsion commands at
+        # typical inter-drone spacings, which (via saturation) drove drones
+        # against the box walls where goal attraction just barely balanced
+        # them. Softer, shorter-range separation settles into an interior
+        # equilibrium instead of a wall-pinned one.
+        self.sep_radius = 0.5            # neighbor influence radius (m) -- slightly below natural 5-drone spacing in a 1m cube so repulsion fades at the emergent spacing
+        self.sep_gain = 0.5              # soft (1/d) gain
+        self.sep_max = 0.6               # saturate separation velocity command (m/s)
 
         # ---- Goal-volume attraction (identical for every drone) ----
-        # Zero inside the goal box (the swarm is free to arrange itself) and
-        # pulls proportionally to the distance outside the box when a drone is
-        # outside. A mild soft wall just inside the box face prevents drones
-        # from being pushed through the boundary by separation alone.
-        self.goal_gain = 1.5
+        # Outside the box: strong pull toward the nearest interior point.
+        # Inside the box: a weak, isotropic quadratic well centered on the
+        # goal (same potential for every drone -- no per-drone targets,
+        # fully decentralized). The center pull is deliberately much
+        # weaker than typical separation forces so that pairwise separation
+        # still sets the geometric arrangement; the well only biases the
+        # arrangement to fill the box volume rather than collapsing onto
+        # a face. This replaces the old soft-wall repulsion, which had the
+        # pathology of being exactly zero at the margin edge and therefore
+        # producing stable equilibria right on that boundary.
+        # Target interior is shrunk by `goal_margin` so the outside-box pull
+        # fires *before* a drone reaches the nominal face. Without this margin,
+        # a drone sitting exactly on the face sees zero pull and separation
+        # from neighbors parks it just outside the box.
+        self.goal_gain = 2.5             # pull toward shrunken interior when near/outside box
         self.goal_max = 1.5              # saturate goal-attraction velocity command (m/s)
-        self.wall_margin_scale = 0.20    # fraction of extents used as soft-wall thickness
-        self.wall_gain = 2.0
+        self.goal_margin = 0.15          # (m) safe-interior margin for the outside-pull regime
+        self.center_gain = 0.35          # weak pull toward goal center when DEEP INSIDE (per-axis, scaled by extent)
 
         # ---- Ground barrier (never crash into z = 0) ----
         self.ground_clearance = 0.30
         self.ground_gain = 6.0
 
-        # Velocity damping on the commanded velocity field: kills flailing by
-        # opposing motion that is not produced by one of the force terms.
-        # Stronger on z to suppress any common-mode vertical drift from hover
-        # thrust biases without over-damping horizontal boid motion.
-        self.damping = np.array([1.0, 1.0, 3.0])
+        # Velocity damping on the commanded velocity field. Raised on x/y to
+        # kill the Drone1<->Drone4 limit cycle observed in the 60s run (the
+        # two drones were trading separation impulses without enough damping
+        # to dissipate the energy each cycle).
+        self.damping = np.array([2.5, 2.5, 3.5])
 
     # ------------------------------------------------------------------
     # Force-field components (all returned as velocity commands, m/s)
@@ -89,13 +101,12 @@ class Drone:
                 continue
 
             dir_vec = diff / dist
-            # Soft 1/d potential gradient, smoothly goes to zero at d0
+            # Soft 1/d potential gradient, smoothly goes to zero at d0.
+            # No stiff 1/d^2 core: the saturation `sep_max` bounds the
+            # command if drones ever get close, and at typical spacings the
+            # soft term alone is both enough to avoid contact and soft
+            # enough not to drive drones into the walls.
             mag = self.sep_gain * (1.0 / dist - 1.0 / d0)
-            # Stiff 1/d^2 core that dominates as dist -> 0
-            if dist < self.sep_close:
-                mag += self.sep_hard_gain * (
-                    1.0 / (dist * dist) - 1.0 / (self.sep_close * self.sep_close)
-                )
             repulsion += mag * dir_vec
 
         mag = np.linalg.norm(repulsion)
@@ -105,25 +116,43 @@ class Drone:
 
     def goal_attraction(self):
         """
-        Shared goal-volume attractor (identical for every drone). The drone is
-        pulled toward the nearest point inside the *margin-shrunk* goal box.
-        Inside that safe interior the force is zero, so distribution is set by
-        pairwise separation alone; outside it (including "just outside a face"),
-        the pull is proportional to the distance to the safe interior and is
-        strong enough to overcome separation, so equilibria are strictly
-        inside the goal volume (not trapped on a face).
+        Shared goal-volume attractor (identical for every drone, no per-drone
+        targets). Two regimes:
+          * Outside the goal box: strong pull toward the nearest point on the
+            box face, proportional to how far outside the drone is. This is
+            what guarantees the swarm ends up inside the volume.
+          * Inside the goal box: a weak per-axis quadratic well centered on
+            the goal center. The well is weak enough that pairwise separation
+            dominates the local geometry (so the arrangement inside is
+            emergent), but strong enough that the globally stable
+            configuration fills the box rather than collapsing onto one face.
+            Because every drone sees the same potential, this is fully
+            decentralized -- the well does NOT assign a per-drone slot.
         """
         pos = self.x[0:3]
         center = self.goal_region['center']
         extents = self.goal_region['extents']
-        margin = self.wall_margin_scale * extents
 
+        # Shrunken "safe interior" target box. The outside-pull regime points
+        # to the nearest point of this shrunken box, so there is a non-zero
+        # inward pull anywhere within `goal_margin` of a face (and outside).
+        margin = min(self.goal_margin, float(np.min(extents)) * 0.5)
         lower_safe = center - extents + margin
         upper_safe = center + extents - margin
 
-        # Nearest point inside the safe interior
-        target = np.minimum(np.maximum(pos, lower_safe), upper_safe)
-        force = self.goal_gain * (target - pos)
+        # Nearest point on/inside the shrunken safe interior.
+        nearest_inside = np.minimum(np.maximum(pos, lower_safe), upper_safe)
+
+        # Pull toward the safe interior: nonzero whenever the drone is outside
+        # the safe interior (which includes the margin band inside each face).
+        force = self.goal_gain * (nearest_inside - pos)
+
+        # Deep-inside weak center well (normalised by extent). Applied only on
+        # axes where the drone is already inside the safe interior, so the
+        # outside-pull term above is not double-counted.
+        for i in range(3):
+            if lower_safe[i] <= pos[i] <= upper_safe[i]:
+                force[i] += self.center_gain * (center[i] - pos[i]) / extents[i]
 
         # Saturate so takeoff or a large initial offset cannot produce huge
         # velocity commands that would destabilize the attitude loop.
