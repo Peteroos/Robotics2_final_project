@@ -1,7 +1,8 @@
 """
-Run the swarm simulation in headless mode and plot color-coded drone
-trajectories from the three orthogonal perspectives (XY top, XZ front,
-YZ side). Output: three PNG files in the project `doc/` folder.
+Run the swarm simulation in headless mode and plot fixed-time scatter
+samples of each drone trajectory from the three orthogonal perspectives
+(XY top, XZ front, YZ side). Output: one PDF per drone in the project
+`doc/` folder.
 
 This script intentionally mirrors the headless simulation loop in `main.py`
 so that no matplotlib animation runs concurrently with the physics (the
@@ -29,6 +30,7 @@ Iz = 0.04
 dt_fixed = 0.01
 T_traj = 10.0
 SIM_DURATION = 60.0
+PLOT_SAMPLE_INTERVAL = 0.25
 
 DOC_DIR = "/Users/mmccall/Library/CloudStorage/OneDrive-Personal/Documents/_RPI/Spring 2026/Robotics II/Robotics2_final_project/doc"
 
@@ -53,8 +55,6 @@ def run_simulation():
     n_steps = int(SIM_DURATION / dt_fixed)
     # Record every drone's position at every physics step (100 Hz).
     trajectories = [[] for _ in drones]
-    times = []
-
     start = time.time()
     for k in range(n_steps):
         t = k * dt_fixed
@@ -66,7 +66,6 @@ def run_simulation():
             drone.update(t, dt_fixed, m, g, Ix, Iy, Iz, T_traj,
                          neighbor_positions[:NUM_NEIGHBORS])
             trajectories[i].append(drone.x[0:3].copy())
-        times.append(t)
 
     print(f"Simulated {SIM_DURATION:.1f}s in {time.time()-start:.2f}s wall time")
     return [np.array(tr) for tr in trajectories], goal_region, drones
@@ -83,18 +82,44 @@ def draw_box_2d(ax, center, extents, axes):
             linewidth=1.5, label="Goal region")
 
 
-def plot_view(trajectories, goal_region, drones, axes, labels, filename, title):
+def sample_trajectory_fixed_time(traj, dt, sample_interval):
+    step_interval = max(1, int(round(sample_interval / dt)))
+    sampled = traj[::step_interval]
+    if len(sampled) == 0 or not np.array_equal(sampled[-1], traj[-1]):
+        sampled = np.vstack((sampled, traj[-1]))
+    return sampled
+
+
+def plot_view(ax, trajectory, goal_region, axes, labels, title, color):
     i, j = axes
-    fig, ax = plt.subplots(figsize=(8, 8))
-    colors = plt.cm.tab10(np.linspace(0, 1, len(trajectories)))
-    for k, tr in enumerate(trajectories):
-        ax.plot(tr[:, i], tr[:, j], color=colors[k],
-                linewidth=1.2, label=drones[k].name, alpha=0.9)
-        # start and end markers
-        ax.scatter(tr[0, i], tr[0, j], color=colors[k],
-                   marker="o", s=60, edgecolors="black", zorder=5)
-        ax.scatter(tr[-1, i], tr[-1, j], color=colors[k],
-                   marker="X", s=90, edgecolors="black", zorder=5)
+    ax.scatter(
+        trajectory[:, i],
+        trajectory[:, j],
+        color=color,
+        s=18,
+        alpha=0.85,
+        linewidths=0.0,
+    )
+    ax.scatter(
+        trajectory[0, i],
+        trajectory[0, j],
+        color=color,
+        marker="o",
+        s=70,
+        edgecolors="black",
+        zorder=5,
+        label="Start",
+    )
+    ax.scatter(
+        trajectory[-1, i],
+        trajectory[-1, j],
+        color=color,
+        marker="X",
+        s=95,
+        edgecolors="black",
+        zorder=5,
+        label="End",
+    )
     draw_box_2d(ax, goal_region["center"], goal_region["extents"], axes)
     ax.set_xlabel(f"{labels[0]} (m)")
     ax.set_ylabel(f"{labels[1]} (m)")
@@ -102,9 +127,46 @@ def plot_view(trajectories, goal_region, drones, axes, labels, filename, title):
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best", fontsize=9)
-    fig.tight_layout()
+
+
+def set_equal_limits(ax, all_points_2d, padding=0.05):
+    mins = np.min(all_points_2d, axis=0)
+    maxs = np.max(all_points_2d, axis=0)
+    center = 0.5 * (mins + maxs)
+    span = max(maxs - mins)
+    half_range = 0.5 * span + padding
+    ax.set_xlim(center[0] - half_range, center[0] + half_range)
+    ax.set_ylim(center[1] - half_range, center[1] + half_range)
+
+
+def plot_drone_views(drone_name, trajectory, goal_region, filename):
+    views = (
+        ((0, 1), ("X", "Y"), "Top view (XY plane, looking -Z)"),
+        ((0, 2), ("X", "Z"), "Front view (XZ plane, looking +Y)"),
+        ((1, 2), ("Y", "Z"), "Side view (YZ plane, looking +X)"),
+    )
+    color = plt.cm.tab10(0)
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    for ax, (view_axes, labels, title) in zip(axes, views):
+        plot_view(ax, trajectory, goal_region, view_axes, labels, title, color)
+        projected_traj = trajectory[:, list(view_axes)]
+        center = goal_region["center"][list(view_axes)]
+        extents = goal_region["extents"][list(view_axes)]
+        box_corners = np.array([
+            [center[0] - extents[0], center[1] - extents[1]],
+            [center[0] - extents[0], center[1] + extents[1]],
+            [center[0] + extents[0], center[1] - extents[1]],
+            [center[0] + extents[0], center[1] + extents[1]],
+        ])
+        all_points_2d = np.vstack((projected_traj, box_corners))
+        set_equal_limits(ax, all_points_2d)
+    fig.suptitle(
+        f"{drone_name} trajectory samples every {PLOT_SAMPLE_INTERVAL:.2f} s",
+        fontsize=14,
+    )
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.95), w_pad=0.6)
     out_path = os.path.join(DOC_DIR, filename)
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path)
     plt.close(fig)
     print(f"Saved {out_path}")
 
@@ -112,23 +174,14 @@ def plot_view(trajectories, goal_region, drones, axes, labels, filename, title):
 def main():
     os.makedirs(DOC_DIR, exist_ok=True)
     trajectories, goal_region, drones = run_simulation()
+    sampled_trajectories = [
+        sample_trajectory_fixed_time(tr, dt_fixed, PLOT_SAMPLE_INTERVAL)
+        for tr in trajectories
+    ]
 
-    # Three orthogonal views:
-    #   Top   (XY): look down the +Z axis
-    #   Front (XZ): look down the +Y axis
-    #   Side  (YZ): look down the +X axis
-    plot_view(trajectories, goal_region, drones,
-              axes=(0, 1), labels=("X", "Y"),
-              filename="trajectories_top_xy.png",
-              title="Drone trajectories - Top view (XY plane, looking -Z)")
-    plot_view(trajectories, goal_region, drones,
-              axes=(0, 2), labels=("X", "Z"),
-              filename="trajectories_front_xz.png",
-              title="Drone trajectories - Front view (XZ plane, looking +Y)")
-    plot_view(trajectories, goal_region, drones,
-              axes=(1, 2), labels=("Y", "Z"),
-              filename="trajectories_side_yz.png",
-              title="Drone trajectories - Side view (YZ plane, looking +X)")
+    for drone, traj in zip(drones, sampled_trajectories):
+        filename = f"{drone.name.lower()}_trajectory_samples.pdf"
+        plot_drone_views(drone.name, traj, goal_region, filename)
 
 
 if __name__ == "__main__":
